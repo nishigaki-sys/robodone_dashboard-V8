@@ -8,7 +8,8 @@ import {
 } from "firebase/firestore";
 import { 
     LayoutDashboard, Users, DollarSign, Megaphone, Settings, 
-    LogOut, MapPin, RefreshCw, Activity, Edit2, Trash2, ArrowUp, ArrowDown 
+    LogOut, MapPin, RefreshCw, Activity, Edit2, Trash2, ArrowUp, ArrowDown,
+    Printer // 帳票出力用アイコン
 } from "lucide-react";
 import { 
     ResponsiveContainer, BarChart, Bar, LineChart, Line, ComposedChart, 
@@ -24,11 +25,14 @@ import { formatYen } from "../../utils/formatters";
 // コンポーネントのインポート
 import { StatCard } from "../../components/dashboard/StatCard";
 import { DetailModal } from "../../components/common/DetailModal";
+import { ReportView } from "../../components/reports/ReportView"; // 帳票コンポーネント
+import { AnnualReportView } from "../../components/reports/AnnualReportView"; // 年間計画表コンポーネント
 
 export default function HQConsole({ onBack, campusList, allData, selectedYear, setSelectedYear, refreshData, showNotify, isSyncing, lastUpdated, isUsingCache, isAdmin }) {
     const [activeTab, setActiveTab] = useState('dashboard');
     const [viewMode, setViewMode] = useState('annual');
     const [selectedMonth, setSelectedMonth] = useState('4月');
+    const [reportMode, setReportMode] = useState('monthly'); // 'monthly' | 'annual' (帳票タブ用)
     
     // カスタム期間の初期値設定
     const [customStartMonth, setCustomStartMonth] = useState(() => {
@@ -57,6 +61,21 @@ export default function HQConsole({ onBack, campusList, allData, selectedYear, s
     const [editName, setEditName] = useState("");
     const [editSheetName, setEditSheetName] = useState("");
     const [isReordering, setIsReordering] = useState(false);
+
+    // 印刷用インラインスタイルの定義
+    const reportStyle = `
+        @media print {
+            @page { 
+                size: A4 ${reportMode === 'annual' ? 'landscape' : 'portrait'}; 
+                margin: 5mm; 
+            }
+            body {
+                zoom: ${reportMode === 'annual' ? '0.9' : '0.83'};
+            }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+        }
+    `;
 
     // カスタム期間変更ハンドラ
     const handleCustomDateChange = (type, part, val) => {
@@ -132,7 +151,58 @@ export default function HQConsole({ onBack, campusList, allData, selectedYear, s
 
     const monthDataForPL = useMemo(() => { return fullDashboardData.find(m => m.name === selectedMonth); }, [fullDashboardData, selectedMonth]);
 
-    // 合計値の計算
+    // 全校舎合算の計画データを計算するロジック (帳票出力用)
+    const aggregatedFullYearPlanData = useMemo(() => {
+        const plans = allData.campusPlans || [];
+        const targetYearNum = Number(selectedYear);
+        
+        const filteredPlans = plans.filter(p => {
+            if (p.year !== targetYearNum) return false;
+            if (selectedHQCampusId !== 'All' && p.campusId !== selectedHQCampusId) return false;
+            return true;
+        });
+
+        const agg = { initialStudents: 0 };
+        filteredPlans.forEach(doc => {
+            const p = doc.plans || {};
+            agg.initialStudents += (Number(p.initialStudents) || 0);
+            MONTHS_LIST.forEach(m => {
+                if (!agg[m]) agg[m] = { 
+                    enrollments: 0, withdrawals: 0, touchTry: 0, flyers: 0, trials: 0, 
+                    revenue: 0, entranceFee: 0, otherSales: 0, adCost: 0, salesCost: 0, 
+                    laborCost: 0, facilityCost: 0, adminCost: 0, weeks: [] 
+                };
+                const mPlan = p[m] || {};
+                agg[m].enrollments += (Number(mPlan.enrollments) || 0);
+                agg[m].withdrawals += (Number(mPlan.withdrawals) || 0);
+                agg[m].touchTry += (Number(mPlan.touchTry) || 0);
+                agg[m].flyers += (Number(mPlan.flyers) || 0);
+                agg[m].trials += (Number(mPlan.trials) || 0);
+                agg[m].revenue += (Number(mPlan.revenue) || 0);
+                agg[m].entranceFee += (Number(mPlan.entranceFee) || 0);
+                agg[m].otherSales += (Number(mPlan.otherSales) || 0);
+                agg[m].adCost += (Number(mPlan.adCost) || 0);
+                agg[m].salesCost += (Number(mPlan.salesCost) || 0);
+                agg[m].laborCost += (Number(mPlan.laborCost) || 0);
+                agg[m].facilityCost += (Number(mPlan.facilityCost) || 0);
+                agg[m].adminCost += (Number(mPlan.adminCost) || 0);
+                
+                if (mPlan.weeks) {
+                    mPlan.weeks.forEach((w, i) => {
+                        if (!agg[m].weeks[i]) agg[m].weeks[i] = { touchTry:0, flyers:0, trialApp:0, trialParticipation:0, enrollments:0 };
+                        agg[m].weeks[i].touchTry += (Number(w.touchTry) || 0);
+                        agg[m].weeks[i].flyers += (Number(w.flyers) || 0);
+                        agg[m].weeks[i].trialApp += (Number(w.trialApp) || 0);
+                        agg[m].weeks[i].trialParticipation += (Number(w.trialParticipation) || 0);
+                        agg[m].weeks[i].enrollments += (Number(w.enrollments) || 0);
+                    });
+                }
+            });
+        });
+        return agg;
+    }, [allData.campusPlans, selectedYear, selectedHQCampusId]);
+
+    // 合計値の計算 (実績)
     const totals = useMemo(() => {
         const initial = { revenue: 0, prevRevenue: 0, expense: 0, prevExpense: 0, profit: 0, prevProfit: 0, newEnrollments: 0, prevNewEnrollments: 0, withdrawals: 0, prevWithdrawals: 0, transferIns: 0, returns: 0, graduates: 0, transfers: 0, flyers: 0, touchTry: 0, trialApp: 0, eventApp: 0, trialScheduled: 0, eventScheduled: 0, trialActual: 0, partTime: 0 };
         
@@ -165,7 +235,7 @@ export default function HQConsole({ onBack, campusList, allData, selectedYear, s
             trialActual: acc.trialActual + (curr.trialActual || 0), partTime: acc.partTime + (curr.partTime || 0)
         }), initial);
     }, [displayData, viewMode, monthDataForPL]);
-    
+
     const monthlySummaryData = useMemo(() => {
         if (viewMode !== 'monthly' || !monthDataForPL) return [];
         const data = [
@@ -191,7 +261,7 @@ export default function HQConsole({ onBack, campusList, allData, selectedYear, s
         return mData ? mData.students : 0;
     }, [fullDashboardData, viewMode, selectedMonth, displayData, monthDataForPL]);
 
-    // 計画データの集計 (Firestoreから取得したcampusPlansを使用)
+    // 計画データの集計 (ダッシュボード表示用)
     const currentPlanData = useMemo(() => {
         const plans = allData.campusPlans || [];
         const targetYearNum = Number(selectedYear);
@@ -373,11 +443,12 @@ export default function HQConsole({ onBack, campusList, allData, selectedYear, s
     const handlePLRowClick = (item) => { if (!monthDataForPL) return; if (item.id === 'revenue' || item.id === 'profit') return; setSelectedPLItem(item); };
 
     return (
-        <div className="flex h-screen bg-brand-slate overflow-hidden fade-in">
+        <div className="flex h-screen bg-brand-slate overflow-hidden fade-in print:block print:h-auto print:bg-white">
+            <style>{reportStyle}</style>
             <DetailModal isOpen={modalOpen} onClose={()=>setModalOpen(false)} data={modalData} title={modalTitle} color={modalColor} />
             
             {editModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay backdrop-blur-sm transition-opacity" onClick={() => setEditModalOpen(false)}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay backdrop-blur-sm transition-opacity no-print" onClick={() => setEditModalOpen(false)}>
                     <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
                         <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center"><Edit2 className="w-5 h-5 mr-2 text-brand-blue"/> 校舎情報の修正</h3>
                         <div className="space-y-4">
@@ -393,13 +464,20 @@ export default function HQConsole({ onBack, campusList, allData, selectedYear, s
                 </div>
             )}
             
-            <aside className="w-64 bg-white border-r border-gray-200 flex flex-col z-10">
+            <aside className="w-64 bg-white border-r border-gray-200 flex flex-col z-10 no-print">
                 <div className="p-6 border-b border-gray-100 flex items-center space-x-3">
                     <div className="w-8 h-8 bg-brand-blue rounded flex items-center justify-center"><LayoutDashboard className="w-5 h-5 text-white" /></div>
                     <span className="font-bold text-lg text-gray-800">本部</span>
                 </div>
                 <nav className="flex-1 p-4 space-y-1">
-                    {[{id:'dashboard',l:'サマリー',i:Activity}, {id:'pl',l:'収支・PL',i:DollarSign}, {id:'students',l:'生徒数',i:Users}, {id:'marketing',l:'マーケティング',i:Megaphone}, {id:'settings',l:'校舎管理',i:Settings}].map(t => {
+                    {[
+                        {id:'dashboard',l:'サマリー',i:Activity}, 
+                        {id:'pl',l:'収支・PL',i:DollarSign}, 
+                        {id:'students',l:'生徒数',i:Users}, 
+                        {id:'marketing',l:'マーケティング',i:Megaphone},
+                        {id:'report',l:'帳票出力',i:Printer}, // 帳票タブ追加
+                        {id:'settings',l:'校舎管理',i:Settings}
+                    ].map(t => {
                         if (t.id === 'settings' && !isAdmin) return null;
                         return (
                             <button 
@@ -421,9 +499,9 @@ export default function HQConsole({ onBack, campusList, allData, selectedYear, s
                 </div>
             </aside>
             
-            <main className="flex-1 overflow-y-auto">
-                <header className="bg-white h-16 border-b border-gray-200 flex items-center justify-between px-8 sticky top-0 z-20">
-                    <h2 className="text-xl font-bold text-gray-800">{{dashboard:'全校サマリー', pl:'収支・PL分析', students:'生徒数・入退会', marketing:'集客・ファネル', settings:'校舎マスタ管理'}[activeTab]}</h2>
+            <main className="flex-1 overflow-y-auto print:overflow-visible">
+                <header className="bg-white h-16 border-b border-gray-200 flex items-center justify-between px-8 sticky top-0 z-20 no-print">
+                    <h2 className="text-xl font-bold text-gray-800">{{dashboard:'全校サマリー', pl:'収支・PL分析', students:'生徒数・入退会', marketing:'集客・ファネル', report:'全校帳票出力', settings:'校舎マスタ管理'}[activeTab]}</h2>
                     <div className="flex items-center space-x-3">
                         {activeTab !== 'settings' && (
                             <>
@@ -434,39 +512,20 @@ export default function HQConsole({ onBack, campusList, allData, selectedYear, s
                                         {campusList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                     </select>
                                 </div>
-                                <div className="flex bg-gray-100 rounded-lg p-1 border border-gray-200">
-                                    {[...availableViewModes, 'custom'].map(m => (
-                                        <button key={m} onClick={()=>setViewMode(m)} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${viewMode===m ? 'bg-white text-brand-blue shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                                            {{annual:'年度', half:'半期', quarter:'四半期', monthly:'月度', weekly:'週次', custom:'期間指定'}[m]}
-                                        </button>
-                                    ))}
-                                </div>
-                                {(viewMode === 'monthly' || viewMode === 'weekly') && (
+                                {activeTab !== 'report' && (
+                                    <div className="flex bg-gray-100 rounded-lg p-1 border border-gray-200">
+                                        {[...availableViewModes, 'custom'].map(m => (
+                                            <button key={m} onClick={()=>setViewMode(m)} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${viewMode===m ? 'bg-white text-brand-blue shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                                                {{annual:'年度', half:'半期', quarter:'四半期', monthly:'月度', weekly:'週次', custom:'期間指定'}[m]}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                                {(viewMode === 'monthly' || viewMode === 'weekly' || activeTab === 'report') && (
                                     <div className="flex items-center bg-gray-50 rounded-lg px-2 py-1 border border-gray-200">
                                         <select value={selectedMonth} onChange={(e)=>setSelectedMonth(e.target.value)} className="bg-transparent text-sm font-bold text-gray-700 outline-none cursor-pointer">
                                             {MONTHS_LIST.map(m=><option key={m} value={m}>{m}</option>)}
                                         </select>
-                                    </div>
-                                )}
-                                {viewMode === 'custom' && (
-                                    <div className="flex items-center bg-gray-50 rounded-lg px-2 py-1 border border-gray-200 gap-2">
-                                        <div className="flex items-center gap-1">
-                                            <select value={customStartMonth.split('-')[0]} onChange={(e) => handleCustomDateChange('start', 'year', e.target.value)} className="bg-transparent text-xs font-bold text-gray-700 outline-none cursor-pointer">
-                                                {YEARS_LIST.map(y => <option key={y} value={y}>{y}年</option>)}
-                                            </select>
-                                            <select value={parseInt(customStartMonth.split('-')[1])} onChange={(e) => handleCustomDateChange('start', 'month', e.target.value)} className="bg-transparent text-xs font-bold text-gray-700 outline-none cursor-pointer">
-                                                {Array.from({length:12}, (_,i)=>i+1).map(m => <option key={m} value={m}>{m}月</option>)}
-                                            </select>
-                                        </div>
-                                        <span className="text-gray-400 text-xs">〜</span>
-                                        <div className="flex items-center gap-1">
-                                            <select value={customEndMonth.split('-')[0]} onChange={(e) => handleCustomDateChange('end', 'year', e.target.value)} className="bg-transparent text-xs font-bold text-gray-700 outline-none cursor-pointer">
-                                                {YEARS_LIST.map(y => <option key={y} value={y}>{y}年</option>)}
-                                            </select>
-                                            <select value={parseInt(customEndMonth.split('-')[1])} onChange={(e) => handleCustomDateChange('end', 'month', e.target.value)} className="bg-transparent text-xs font-bold text-gray-700 outline-none cursor-pointer">
-                                                {Array.from({length:12}, (_,i)=>i+1).map(m => <option key={m} value={m}>{m}月</option>)}
-                                            </select>
-                                        </div>
                                     </div>
                                 )}
                             </>
@@ -478,7 +537,34 @@ export default function HQConsole({ onBack, campusList, allData, selectedYear, s
                     </div>
                 </header>
                 
-                <div className="p-8 max-w-7xl mx-auto">
+                {/* 印刷専用エリア (表示はされない) */}
+                <div className="print-only hidden">
+                    {activeTab === 'report' && (
+                        reportMode === 'monthly' ? (
+                            <ReportView 
+                                year={Number(selectedMonth.match(/1|2|3/) ? Number(selectedYear)+1 : selectedYear)} 
+                                month={selectedMonth} 
+                                campus={selectedHQCampusId === 'All' ? { name: "全校舎合計", id: "ALL" } : campusList.find(c=>c.id===selectedHQCampusId)}
+                                dailyData={monthDataForPL?.daily || []}
+                                weeklyData={monthDataForPL?.weekly || []}
+                                planData={aggregatedFullYearPlanData}
+                                summaryData={{
+                                    students: monthDataForPL?.students || 0,
+                                    newEnrollments: monthDataForPL?.newEnrollments || 0,
+                                    withdrawals: monthDataForPL?.withdrawals || 0
+                                }}
+                            />
+                        ) : (
+                            <AnnualReportView 
+                                year={selectedYear}
+                                campus={selectedHQCampusId === 'All' ? { name: "全校舎合計" } : campusList.find(c=>c.id===selectedHQCampusId)}
+                                planData={aggregatedFullYearPlanData}
+                            />
+                        )
+                    )}
+                </div>
+
+                <div className="p-8 max-w-7xl mx-auto no-print">
                     {activeTab === 'dashboard' && (
                         <div className="space-y-8 animate-in fade-in">
                             <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
@@ -740,6 +826,53 @@ export default function HQConsole({ onBack, campusList, allData, selectedYear, s
                                         <Line yAxisId="right" type="monotone" dataKey="newEnrollments" name="入会数" stroke="#10b981" strokeWidth={3} />
                                     </ComposedChart>
                                 </ResponsiveContainer>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'report' && (
+                        <div className="space-y-6 animate-in fade-in no-print">
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                                <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
+                                    <div className="flex items-center gap-4">
+                                        <h3 className="font-bold text-gray-800 flex items-center">
+                                            <Printer className="w-5 h-5 mr-2 text-brand-blue"/> 帳票・計画表の出力
+                                        </h3>
+                                        <div className="flex bg-gray-100 p-1 rounded-lg shadow-inner">
+                                            <button onClick={() => setReportMode('monthly')} className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${reportMode === 'monthly' ? 'bg-white text-brand-blue shadow' : 'text-gray-500'}`}>月度レポート</button>
+                                            <button onClick={() => setReportMode('annual')} className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${reportMode === 'annual' ? 'bg-white text-brand-blue shadow' : 'text-gray-500'}`}>年間計画表</button>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => window.print()} className="bg-brand-blue text-white px-6 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 flex items-center shadow-lg transition-transform active:scale-95">
+                                        <Printer className="w-4 h-4 mr-2"/> {reportMode === 'monthly' ? 'A4レポート印刷' : '計画表印刷(A4横)'}
+                                    </button>
+                                </div>
+                                
+                                <div className="bg-slate-200 p-8 overflow-auto flex justify-center rounded-xl border-4 border-slate-300">
+                                    <div className="shadow-2xl transform scale-90 origin-top bg-white">
+                                        {reportMode === 'monthly' ? (
+                                            <ReportView 
+                                                year={Number(selectedMonth.match(/1|2|3/) ? Number(selectedYear)+1 : selectedYear)} 
+                                                month={selectedMonth} 
+                                                campus={selectedHQCampusId === 'All' ? { name: "全校舎合計", id: "ALL" } : campusList.find(c=>c.id===selectedHQCampusId)}
+                                                dailyData={monthDataForPL?.daily || []}
+                                                weeklyData={monthDataForPL?.weekly || []}
+                                                planData={aggregatedFullYearPlanData}
+                                                summaryData={{
+                                                    students: monthDataForPL?.students || 0,
+                                                    newEnrollments: monthDataForPL?.newEnrollments || 0,
+                                                    withdrawals: monthDataForPL?.withdrawals || 0
+                                                }}
+                                            />
+                                        ) : (
+                                            <AnnualReportView 
+                                                year={selectedYear}
+                                                campus={selectedHQCampusId === 'All' ? { name: "全校舎合計" } : campusList.find(c=>c.id===selectedHQCampusId)}
+                                                planData={aggregatedFullYearPlanData}
+                                            />
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
