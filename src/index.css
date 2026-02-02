@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================
+   Global Styles (from index.html)
+   ========================================== */
+
+body { 
+    font-family: "Helvetica Neue", Arial, sans-serif; 
+    background-color: #F8FAFC; 
+}
+
+/* スクロールバーのカスタマイズ */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #1E51A2; }
+
+/* アニメーション定義 */
+.fade-in { animation: fadeIn 0.3s ease-in-out; }
+@keyframes fadeIn { 
+    from { opacity: 0; transform: translateY(10px); } 
+    to { opacity: 1; transform: translateY(0); } 
+}
+
+.animate-spin { animation: spin 1s linear infinite; }
+@keyframes spin { 
+    from { transform: rotate(0deg); } 
+    to { transform: rotate(360deg); } 
+}
+
+.modal-overlay { background-color: rgba(0, 0, 0, 0.5); }
+
+/* 数値入力フォームの矢印を消す設定 */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Firefox 用 */
+input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* ==========================================
+   Print Styles (印刷用スタイル)
+   ========================================== */
+
+@media print {
+    body { 
+        background-color: white; 
+        -webkit-print-color-adjust: exact; 
+        print-color-adjust: exact; 
+        margin: 0; 
+        padding: 0;
+        zoom: 0.83; 
+    }
+    .no-print { display: none !important; }
+    .print-only { display: block !important; }
+    .page-break { page-break-before: always; }
+    @page { size: A4; margin: 5mm; }
+    .report-container { width: 100%; max-width: 200mm; margin: 0 auto; }
+}
+
+.print-only { display: none; }
+
+/* ==========================================
+   Report Component Styles (帳票用スタイル)
+   ========================================== */
+
+.report-preview-wrapper { 
+    width: 210mm; 
+    min-height: 297mm; 
+    background: white; 
+    margin: 0 auto; 
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    box-sizing: border-box; 
+}
+
+.report-table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    font-size: 10px; 
+    margin-bottom: 10px;
+}
+
+.report-table th, .report-table td { 
+    border: 1px solid #444; 
+    padding: 4px 2px; 
+    text-align: center; 
+    vertical-align: middle;
+    line-height: 1.3;
+}
+
+.report-table th { 
+    background-color: #f3f4f6; 
+    font-weight: 700; 
+    white-space: nowrap; 
+    color: #1f2937;
+}
+
+.report-section-title { 
+    font-size: 12px; 
+    font-weight: bold; 
+    border-left: 5px solid #1E51A2; 
+    padding-left: 8px; 
+    margin: 20px 0 8px 0; 
+    color: #1f2937;
+}
